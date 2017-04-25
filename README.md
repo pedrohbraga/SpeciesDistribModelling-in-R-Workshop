@@ -11,7 +11,5 @@ http://qcbs.ca/wiki/r_symposium
 <br>
 Standard tutorial: https://pedrohbraga.github.io/SDMtutorial/sdm_workshop.html
 <br>
-*But, if you have a fast computer, you can go to this link*: https://pedrohbraga.github.io/SDMtutorial/sdm_workshop.html
-
-Download workshop material:
+*Download the .zip file for the workshop material*: https://www.dropbox.com/s/mzdab9tszd7n05n/SDM_tutorial_v3.zip?dl=0
 
