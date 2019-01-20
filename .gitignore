@@ -1,0 +1,9 @@
+QCBS-R-Revamping-Slides.html
+*data/
+*cache/
+
+.DS_Store
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata

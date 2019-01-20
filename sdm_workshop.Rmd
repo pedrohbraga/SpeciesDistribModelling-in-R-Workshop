@@ -1,0 +1,345 @@
+---
+title: "SDM with R"
+author: "Pedro Henrique Braga and Julia Nordlund"
+date: "April 23, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Outline
+
+This tutorial illustrates how to build, evaluate and project species
+distribution models within R.
+
+The main steps, described bellow, are the following:
+
+1. Data preparation
+    + Study area and manipulating spatial information
+    + Environmental data
+    + Species occurrence data
+        + Presence-and-absence data
+        + Presence-only and pseudo-absences data
+2. Model fitting, prediction, and evaluation
+3. Making projections
+
+# Workshop environment preparation
+
+Install and load all required *R* libraries:
+
+```{r, eval=FALSE}
+install.packages("rgdal")
+install.packages("raster")
+install.packages("rgeos")
+install.packages("dismo")
+install.packages("letsR")
+install.packages("biomod2")
+install.packages("biogeo")
+install.packages("maptools")
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(rgdal)
+library(raster)
+library(rgeos)
+library(dismo)
+library(letsR)
+library(biomod2)
+library(biogeo)
+library(maptools)
+```
+
+Download the .zip file from xxxx and extract files to your QCBS R Symposium workshop folder.
+
+Then, set your working directory to the same directory of the folder `workshopSDM` using the functions `setwd()` or your prefered method.
+
+# Data preparation
+
+## Selecting your study area and manipulating spatial files
+
+Most species distribution models are done using spatial grid information. In the next step, we will learn how to create a polygon grid of a given region, which will be used within our species distribution model framework.
+
+For this tutorial, we have chosen the Neotropical zoogeographical region as our study area. Load the polygon shapefile of it using the `readOGR` function:
+
+```{r, echo = TRUE}
+neotropical_shape <- rgdal::readOGR("data/shapefiles/neotropical.shp")
+plot(neotropical_shape)
+```
+
+Now that we have our study region, we need to create a grid, intersect our shapefile and create a new grid of that region. For this, we will use the `GridFilter` function. It allows us to input a polygon shapefile, specify a resolution and the proportion of overlap for each cell to be considered.
+
+We will apply it , intersect and crop its features with the polygon `neotropical_shape` you have loaded.
+
+```{r, eval = FALSE}
+GridFilter <- function(shape, resol = 1, prop = 0)
+{
+
+  grid <- raster(extent(shape))
+  res(grid) <- resol
+  proj4string(grid)<-proj4string(shape)
+  gridpolygon <- rasterToPolygons(grid)
+  drylandproj<-spTransform(shape, CRS("+proj=laea"))
+  gridpolproj<-spTransform(gridpolygon, CRS("+proj=laea"))
+  gridpolproj$layer <- c(1:length(gridpolproj$layer))
+  areagrid <- gArea(gridpolproj, byid=T)
+  gridpolproj <- gBuffer(gridpolproj, byid=TRUE, width=0)
+  dry.grid <- intersect(drylandproj, gridpolproj)
+  areadrygrid <- gArea(dry.grid, byid=T)
+  info <- cbind(dry.grid$layer, areagrid[dry.grid$layer], areadrygrid)
+  dry.grid$layer<-info[,3]/info[,2]
+  dry.grid <- spTransform(dry.grid, CRS(proj4string(shape)))
+  dry.grid.filtered <- dry.grid[dry.grid$layer >= prop,]
+}
+
+# Create a spatial polygon grid for the Neotropical region, with 5 degrees  x 5 degrees
+neotropical_grid <- GridFilter(neotropical_shape, resol = 5, prop = 0.5)
+
+
+```
+
+```{r, eval = FALSE}
+# Export your resulting polygon grid 
+writeOGR(neotropical_grid, dsn=paste(getwd(),"/data/shapefiles", sep=""), layer="neotropical_grid_5", driver="ESRI Shapefile", overwrite_layer=T)
+```
+
+This is our resulting polygon grid, where each cell refers to a site (and a row) in our data.
+
+```{r raster, echo=TRUE, warning=FALSE}
+neotropical_grid <-  shapefile("data/shapefiles/neotropical_grid_5.shp")
+plot(neotropical_grid)
+
+```
+
+
+```{r, echo = FALSE}
+# extract coordinates from the cell centroids
+coords <- as.data.frame(coordinates(neotropical_grid))
+colnames(coords) <- c("Longitude_X", "Latitude_Y")
+
+write.table(coords, "data/matrices/NT_coords_5.txt")
+```
+
+
+## Importing environmental variables
+
+
+
+```{r, eval = FALSE}
+
+
+bio_1 <- raster("/data/rasters/w25m_bio_1.asc")
+
+myExpl <- data.frame(bio_1 = numeric(length(neotropical_grid))
+                     )
+
+bio_1_ext <- extract(bio_1,neotropical_grid)
+
+myExpl$bio_1 <- unlist(lapply(bio_1_ext, 
+                              function(x) 
+                                if (!is.null(x)) mean(x, na.rm=TRUE) 
+                              else NA))
+# Let's take a look at our table:
+
+head(myExpl)
+
+write.table(myExpl, "data/matrices/NT_EnvVar_5.txt")
+
+```
+
+
+
+## Importing species data
+### Using expert drawn maps
+
+```{r maptools, echo=TRUE, warning=FALSE}
+speciesGeoDist <- readShapePoly("data/shapefiles/panthera_onca_IUCN.shp",  
+                                   proj4string=CRS("+proj=laea"))
+plot(speciesGeoDist)
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE}
+neotropical_grid <- readShapePoly("data/shapefiles/neotropical_grid_5.shp",  
+                                   proj4string=CRS("+proj=laea"))
+
+
+```
+
+
+Create a presence-absence matrix of species' geographic ranges within your polygon grid shapefile:
+```{r, echo = FALSE}
+abspres.matrix <- lets.presab.grid(speciesGeoDist, neotropical_grid, "ID")
+```
+
+
+You can now visualize a map of your species richness within your polygon grid:
+```{r, echo = FALSE}
+richnessCalc <- rowSums(abspres.matrix$PAM) + 1
+colPalette <- colorRampPalette(c("#fff5f0", "#fb6a4a", "#67000d"))
+colors <- c("white", colPalette(max(richnessCalc)))
+plot(abspres.matrix$grid, border = "gray40",
+     col = colors[richnessCalc])
+map(add = TRUE)
+```
+
+Export your presence-absence matrix:
+```{r, echo = FALSE}
+write.table(abspres.matrix$PAM, "data/matrices/NT_PAM_5.txt")
+```
+
+
+### Using occurrence records
+## Data cleaning
+
+```{r, echo = FALSE}
+# Load our species data
+DataSpecies <- read.table("data/matrices/NT_PAM_5.txt", header=TRUE)
+head(DataSpecies)
+
+# Remove all columns that have less than 4 presences
+to.remove <- colnames(DataSpecies)[colSums(DataSpecies) <= 4]
+`%ni%` <- Negate(`%in%`)
+DataSpecies <- subset(DataSpecies,select = names(DataSpecies) %ni% to.remove)
+
+# Replace "_" per "." 
+names(DataSpecies) <- gsub(x = names(DataSpecies),
+                           pattern = "\\.",
+                           replacement = ".")
+
+DataSpecies <- read.table("data/matrices/NT_PAM_5.txt", header=TRUE)
+
+```
+
+## Species distribution modelling
+
+First, input data needs to be rearranged for usage in biomod2 using `BIOMOD_FormatingData()`. Its most important arguments are: 
+* `resp.var` contains **species data** (for a single species) in **binary format** (ones for presences, zeros for true absences and NA for indeterminated) that will be used **to build the species distribution models**. It may be a vector or a spatial points object.
+* ``expl.var`` contains a matrix, data.frame, SpatialPointsDataFrame or RasterStack containing
+your explanatory variables.
+* ``resp.xy`` two columns matrix containing the X and Y coordinates of resp.var (only consider if resp.var is a vector)
+* ``resp.name`` contains the response variable name (species).
+
+
+```{r, echo = TRUE}
+
+# Recall your variables again: 
+
+## Load prepared species data
+myResp <-  read.table("data/matrices/NT_PAM_5.txt", header=TRUE)
+
+## Load environmental variables
+myExpl <-  read.table("data/matrices/NT_EnvVar_5.txt", header=TRUE)
+
+# Define the species of interest
+myRespName <- names(DataSpecies)[1]
+
+# Load coordinates
+myRespCoord <- read.table("data/matrices/NT_coords_5.txt", header=TRUE)
+
+myBiomodData <- BIOMOD_FormatingData(resp.var = myResp,
+                                     expl.var = myExpl,
+                                     resp.xy = myRespCoord,
+                                     resp.name = myRespName,
+                                     na.rm = TRUE)
+```
+
+```{r, eval = FALSE}
+myBiomodOption <- BIOMOD_ModelingOptions()
+```
+
+
+```{r, eval = FALSE}
+myBiomodModelOut <- BIOMOD_Modeling(
+    myBiomodData,
+    models = c('MAXENT.Tsuruoka', 'RF'),
+    models.options = myBiomodOption,
+    NbRunEval=3,
+    DataSplit=80,
+    Prevalence=0.5,
+    VarImport=3,
+    models.eval.meth = c('TSS','ROC'),
+    SaveObj = TRUE,
+    rescal.all.models = FALSE,
+    do.full.models = FALSE,
+    modeling.id = paste(myRespName,"CurrentClim",sep=""))
+```
+
+
+```{r, eval = FALSE}
+  ### save models evaluation scores and variables importance on hard drive
+  capture.output(get_evaluations(myBiomodModelOut),
+                 file=file.path(myRespName,
+                                paste(myRespName,"_formal_models_eval.txt", sep="")))
+  capture.output(get_variables_importance(myBiomodModelOut),
+                 file=file.path(myRespName,
+                                paste(myRespName,"_formal_models_var_imp.txt", sep="")))
+```
+
+
+```{r, eval = FALSE}
+  ### Building ensemble-models
+  myBiomodEM <- BIOMOD_EnsembleModeling(
+    modeling.output = myBiomodModelOut,
+    chosen.models = 'all',
+    em.by='all',
+    eval.metric = c('TSS'),
+    eval.metric.quality.threshold = c(0.5),
+    prob.mean = T,
+    prob.cv = T,
+    prob.ci = T,
+    prob.ci.alpha = 0.05,
+    prob.median = T,
+    committee.averaging = T,
+    prob.mean.weight = T,
+    prob.mean.weight.decay = 'proportional')
+```
+
+```{r, eval = FALSE}
+  ### Make projections on current variable
+  myBiomodProj <- BIOMOD_Projection(
+    modeling.output = myBiomodModelOut,
+    new.env = myExpl,
+    xy.new.env = myRespCoord,
+    proj.name = 'current',
+    selected.models = 'all',
+    binary.meth = 'TSS',
+    compress = TRUE,
+    clamping.mask = F,
+    output.format = '.RData')
+
+
+myCurrentProj <- getProjection(myBiomodProj)
+myCurrentProj
+
+```
+
+  
+```{r, eval = FALSE}
+  ### Make ensemble-models projections on current variable
+  myBiomodEF <- BIOMOD_EnsembleForecasting(
+    projection.output = myBiomodProj,
+    binary.meth = 'TSS',
+    total.consensus = TRUE,
+    EM.output = myBiomodEM)
+```
+
+# print summary
+myBiomodEM
+
+# get evaluation scores
+getEMeval(myBiomodEM)
+
+```{r, eval = FALSE}
+  ### Make ensemble-models projections on current variable
+# load the first speces binary maps which will define the mask
+
+alphaMap <- reclassify(subset(myExpl,1), c(-Inf,Inf,0))
+
+alphaMap <- get(load(paste(getwd(),"/",myRespName[1],"/proj_current/", "proj_current_",
+                           myRespName[1],"_ensemble_TSSbin.RData",
+                           sep="")))[,1]
+
+``` 
