@@ -9,7 +9,7 @@ http://qcbs.ca/wiki/r_symposium
 
 
 <br>
-Standard tutorial: https://pedrohbraga.github.io/SDMtutorial/sdm_workshop.html
+Standard tutorial: https://pedrohbraga.github.io/SpeciesDistribModelling-in-R-Workshop/sdm_workshop.html
 <br>
 *Download the .zip file for the workshop material*: https://www.dropbox.com/s/mzdab9tszd7n05n/SDM_tutorial_v3.zip?dl=0
 
